@@ -5,8 +5,22 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
 const requests = [];
+const modelRequests = [];
 let redirect = false;
+let modelsStatus = 200;
 const mock = createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/v1/models') {
+    modelRequests.push({ headers: req.headers });
+    if (redirect) {
+      res.writeHead(302, { Location: 'http://127.0.0.1:1/private' }).end();
+    } else if (modelsStatus !== 200) {
+      res.writeHead(modelsStatus).end();
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ object: 'list', data: [{ id: 'qwen3:8b' }, { id: 'llama3.2:latest' }, { id: 'qwen3:8b' }] }));
+    }
+    return;
+  }
   let body = '';
   for await (const chunk of req) body += chunk;
   const payload = JSON.parse(body);
@@ -24,9 +38,20 @@ const mock = createServer(async (req, res) => {
 mock.listen(0, '127.0.0.1');
 await once(mock, 'listening');
 
+// The standalone server treats PORT=0 as unset and falls back to 3000, so reserve a free port.
+async function freePort() {
+  const probe = createServer();
+  probe.listen(0, '127.0.0.1');
+  await once(probe, 'listening');
+  const { port } = probe.address();
+  probe.close();
+  await once(probe, 'close');
+  return port;
+}
+
 async function startApp(ollamaUrl) {
   const app = spawn(process.execPath, ['.next/standalone/server.js'], {
-    env: { ...process.env, HOSTNAME: '127.0.0.1', PORT: '0', OLLAMA_BASE_URL: ollamaUrl },
+    env: { ...process.env, HOSTNAME: '127.0.0.1', PORT: String(await freePort()), OLLAMA_BASE_URL: ollamaUrl },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -91,12 +116,28 @@ try {
   }
   assert.equal(requests.length, 2, 'rejected URLs must not reach Ollama');
   assert.equal((await post(running.origin, 'chat', { messages: [] })).status, 400);
+
+  const models = await fetch(`${running.origin}/api/ollama/models`);
+  assert.equal(models.status, 200);
+  assert.equal(models.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await models.json(), { models: ['llama3.2:latest', 'qwen3:8b'] });
+  assert.equal(modelRequests.length, 1);
+  assert.equal(modelRequests[0].headers.authorization, undefined);
+  const ignored = await fetch(`${running.origin}/api/ollama/models?url=http://127.0.0.1:1`);
+  assert.equal(ignored.status, 200);
+  assert.equal(modelRequests.length, 2, 'the query string must not change the destination');
+  modelsStatus = 500;
+  const upstreamError = await fetch(`${running.origin}/api/ollama/models`);
+  assert.equal(upstreamError.status, 502);
+  modelsStatus = 200;
+
   redirect = true;
   for (const route of ['chat', 'smart-reply']) {
     const res = await post(running.origin, route);
     assert.equal(res.status, 400);
     assert.match((await res.json()).error, /redirect/);
   }
+  assert.equal((await fetch(`${running.origin}/api/ollama/models`)).status, 502, 'redirects must not be followed');
   running.app.kill();
   await once(running.app, 'exit');
   running = await startApp('');
@@ -105,7 +146,10 @@ try {
     assert.equal(res.status, 400);
     assert.match((await res.json()).error, /OLLAMA_BASE_URL/);
   }
-  console.log('Ollama route integration checks passed (stream, usage, replies, validation, SSRF, redirects, missing configuration).');
+  const unconfigured = await fetch(`${running.origin}/api/ollama/models`);
+  assert.equal(unconfigured.status, 400);
+  assert.match((await unconfigured.json()).error, /OLLAMA_BASE_URL/);
+  console.log('Ollama route integration checks passed (stream, usage, replies, models, validation, SSRF, redirects, missing configuration).');
 } finally {
   if (running && running.app.exitCode === null) {
     running.app.kill();
