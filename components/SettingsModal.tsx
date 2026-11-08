@@ -25,6 +25,9 @@ import { Character, Message, TalkProfile, UserSettings, activeProfile, saveSetti
 import { useModalDismiss } from '@/hooks/use-modal-dismiss';
 import { downloadJsonFile } from '@/lib/utils';
 
+const OLLAMA_BASE_URL = '/api/ollama';
+const MANUAL_MODEL_OPTION = '__manual__';
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -45,11 +48,20 @@ function SettingsFormModal({
 
   // API Settings State
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl || '/api/chat');
+  const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaUrl || '');
   const [apiKey, setApiKey] = useState(settings.apiKey || '');
   const [modelName, setModelName] = useState(settings.modelName || 'gemini-2.5-flash');
   const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
   const [maxHistoryCount, setMaxHistoryCount] = useState(settings.maxHistoryCount ?? 20);
   const [showApiKey, setShowApiKey] = useState(false);
+
+  // Ollama model list: only fetched while the Base URL points at the Ollama alias.
+  const isOllama = baseUrl.trim() === OLLAMA_BASE_URL;
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaStatus, setOllamaStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [ollamaError, setOllamaError] = useState('');
+  const [manualModel, setManualModel] = useState(false);
+  const [ollamaReloadKey, setOllamaReloadKey] = useState(0);
 
   // User Settings State
   // Talk profiles: the whole library is edited here, the active one is what gets used.
@@ -109,6 +121,48 @@ function SettingsFormModal({
     };
   }, []);
 
+  useEffect(() => {
+    if (!isOllama) return;
+    const controller = new AbortController();
+    const trimmedUrl = ollamaUrl.trim();
+    async function loadOllamaModels() {
+      setOllamaStatus('loading');
+      setOllamaError('');
+      try {
+        const query = trimmedUrl ? `?url=${encodeURIComponent(trimmedUrl)}` : '';
+        const res = await fetch(`/api/ollama/models${query}`, { signal: controller.signal });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setOllamaStatus('error');
+          setOllamaError(data.error || `エラーステータス: ${res.status}`);
+          return;
+        }
+        const models: string[] = Array.isArray(data.models) ? data.models : [];
+        setOllamaModels(models);
+        setOllamaStatus('ready');
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return;
+        setOllamaStatus('error');
+        setOllamaError('モデル一覧を取得できませんでした');
+      }
+    }
+    // Wait for typing to settle so each keystroke does not hit the server.
+    const timer = setTimeout(loadOllamaModels, trimmedUrl ? 500 : 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isOllama, ollamaUrl, ollamaReloadKey]);
+
+  // A model left over from another provider (e.g. gemini-2.5-flash) is not an Ollama model.
+  useEffect(() => {
+    if (!isOllama || manualModel || ollamaStatus !== 'ready' || ollamaModels.length === 0) return;
+    if (!ollamaModels.includes(modelName)) setModelName(ollamaModels[0]);
+  }, [isOllama, manualModel, ollamaStatus, ollamaModels, modelName]);
+
+  const showOllamaSelect =
+    isOllama && !manualModel && ollamaStatus === 'ready' && ollamaModels.length > 0;
+
   const handleTestConnection = async () => {
     setTestStatus('testing');
     setTestMessage('接続テスト中...');
@@ -123,6 +177,7 @@ function SettingsFormModal({
             { role: 'user', content: 'Ping' },
           ],
           baseUrl,
+          ollamaUrl,
           apiKey,
           modelName,
           temperature: 0.5,
@@ -162,6 +217,7 @@ function SettingsFormModal({
           ? activeId
           : normalizedProfiles[0].id,
         baseUrl: baseUrl.trim() || '/api/chat',
+        ollamaUrl: ollamaUrl.trim(),
         apiKey: apiKey.trim(),
         modelName: modelName.trim() || 'gemini-2.5-flash',
         temperature: Number(temperature),
@@ -391,9 +447,32 @@ function SettingsFormModal({
                 />
                 <p className="text-[11px] text-zinc-500">
                   Gemini は「/api/chat」、Ollama は「/api/ollama」を指定します。
-                  Ollama の API Key は空欄にし、Model Name に取得済みのモデル名を入力してください。
+                  Ollama の API Key は空欄にし、Model Name は取得済みのモデルから選択してください。
                 </p>
               </div>
+
+              {/* Ollama URL */}
+              {isOllama && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-zinc-500" />
+                    Ollama URL (接続先)
+                  </label>
+                  <input
+                    id="settings-ollama-url-input"
+                    type="text"
+                    value={ollamaUrl}
+                    onChange={(e) => setOllamaUrl(e.target.value)}
+                    placeholder="http://localhost:11434"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 text-sm font-mono transition-all"
+                  />
+                  <p className="text-[11px] text-zinc-500">
+                    このアプリを動かしているサーバーから見た Ollama のアドレスを入力します。
+                    空欄の場合はサーバーの OLLAMA_BASE_URL を使います。
+                    アプリを Docker で動かしている場合は http://host.docker.internal:11434 を指定してください。
+                  </p>
+                </div>
+              )}
 
               {/* API Key */}
               <div className="space-y-1.5">
@@ -431,14 +510,67 @@ function SettingsFormModal({
                   <Cpu className="w-4 h-4 text-zinc-500" />
                   Model Name (モデル名)
                 </label>
-                <input
-                  id="settings-model-name-input"
-                  type="text"
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                  placeholder="e.g. gpt-4o, gpt-4o-mini, llama3.2, gemini-2.5-flash"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 text-sm font-mono transition-all"
-                />
+                {showOllamaSelect ? (
+                  <select
+                    id="settings-model-name-select"
+                    value={modelName}
+                    onChange={(e) => {
+                      if (e.target.value === MANUAL_MODEL_OPTION) {
+                        setManualModel(true);
+                      } else {
+                        setModelName(e.target.value);
+                      }
+                    }}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-100 focus:outline-none focus:border-indigo-500/50 text-sm font-mono transition-all"
+                  >
+                    {ollamaModels.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                    <option value={MANUAL_MODEL_OPTION}>手動で入力…</option>
+                  </select>
+                ) : (
+                  <input
+                    id="settings-model-name-input"
+                    type="text"
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    placeholder="e.g. gpt-4o, gpt-4o-mini, llama3.2, gemini-2.5-flash"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 text-sm font-mono transition-all"
+                  />
+                )}
+                {isOllama && (
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                    <span>
+                      {ollamaStatus === 'loading' && 'Ollama のモデル一覧を取得中...'}
+                      {ollamaStatus === 'error' &&
+                        `${ollamaError} Ollama URL（空欄なら OLLAMA_BASE_URL）を確認するか、モデル名を直接入力してください。`}
+                      {ollamaStatus === 'ready' &&
+                        ollamaModels.length === 0 &&
+                        '取得済みのモデルがありません。ollama pull でモデルを取得してください。'}
+                      {ollamaStatus === 'ready' && ollamaModels.length > 0 && manualModel &&
+                        'モデル名を直接入力しています。'}
+                    </span>
+                    {manualModel && ollamaModels.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setManualModel(false)}
+                        className="text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                      >
+                        一覧から選ぶ
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setOllamaReloadKey((k) => k + 1)}
+                      disabled={ollamaStatus === 'loading'}
+                      className="text-indigo-400 hover:text-indigo-300 cursor-pointer disabled:opacity-50"
+                    >
+                      一覧を再取得
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Temperature & History Count */}

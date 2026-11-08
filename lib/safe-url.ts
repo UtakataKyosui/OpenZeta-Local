@@ -6,6 +6,7 @@
  * it cannot be abused to probe internal / private network resources.
  */
 import { lookup } from 'node:dns/promises';
+import type { LookupAddress } from 'node:dns';
 import net from 'node:net';
 
 export class ExternalUrlError extends Error {}
@@ -152,6 +153,73 @@ export function isBlockedIp(ip: string): boolean {
   if (net.isIPv4(ip)) return isBlockedV4(ip);
   if (net.isIPv6(ip)) return isBlockedV6(ip);
   return true; // unparseable => block
+}
+
+/* ------------------- Client-supplied Ollama destination ------------------- */
+
+// Ollama normally runs on localhost or a LAN host, so private ranges stay reachable.
+// Only addresses that are never a legitimate Ollama host are refused; link-local in
+// particular carries cloud instance-metadata services.
+const OLLAMA_FORBIDDEN_V4_CIDRS: Array<[string, number]> = [
+  ['0.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4]
+];
+
+const OLLAMA_FORBIDDEN_V6_PREFIXES: Array<[string, number]> = [
+  ['::', 128],
+  ['fe80::', 10],
+  ['ff00::', 8],
+  ['64:ff9b::', 96]
+];
+
+export function isForbiddenOllamaIp(ip: string): boolean {
+  if (net.isIPv4(ip)) return OLLAMA_FORBIDDEN_V4_CIDRS.some((cidr) => v4InRange(ip, cidr));
+  if (!net.isIPv6(ip)) return true;
+  const groups = expandV6(ip);
+  if (!groups) return true;
+  if (v6MatchesPrefix(groups, expandV6('::ffff:0:0')!, 96)) {
+    const v4 = `${groups[6] >>> 8}.${groups[6] & 255}.${groups[7] >>> 8}.${groups[7] & 255}`;
+    return isForbiddenOllamaIp(v4);
+  }
+  return OLLAMA_FORBIDDEN_V6_PREFIXES.some(([prefix, bits]) =>
+    v6MatchesPrefix(groups, expandV6(prefix)!, bits)
+  );
+}
+
+/**
+ * Checks a client-supplied Ollama URL (already syntax-checked) before the server
+ * fetches it. Throws ExternalUrlError when the host is, or resolves to, a forbidden address.
+ */
+export async function assertOllamaDestinationAllowed(
+  urlString: string,
+  options?: { timeoutMs?: number }
+): Promise<void> {
+  const forbidden = new ExternalUrlError(
+    'Ollama URL points to a link-local, multicast or reserved address, which is not allowed.'
+  );
+  let host = new URL(urlString).hostname;
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+
+  if (net.isIP(host)) {
+    if (isForbiddenOllamaIp(host)) throw forbidden;
+    return;
+  }
+
+  let results: LookupAddress[];
+  try {
+    results = await Promise.race([
+      lookup(host, { all: true, verbatim: true }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('DNS lookup timed out')), options?.timeoutMs ?? 5000).unref()
+      )
+    ]);
+  } catch {
+    throw new ExternalUrlError(`Could not resolve host "${host}".`);
+  }
+  if (results.length === 0) throw new ExternalUrlError(`Could not resolve host "${host}".`);
+  if (results.some(({ address }) => isForbiddenOllamaIp(address))) throw forbidden;
 }
 
 /* --------------------------- URL validation --------------------------- */

@@ -83,21 +83,37 @@ Ollama は API キー不要です。クラウドモデルを利用する場合�
 | 項目 | 設定値 |
 |---|---|
 | Base URL | `/api/ollama` |
+| Ollama URL | 空欄（サーバーの `OLLAMA_BASE_URL` を使う）、または接続先（例: `http://localhost:11434`） |
 | API Key | 空欄 |
-| Model Name | `ollama list` に表示される取得済みモデル名（例: `llama3.2`） |
+| Model Name | 取得済みモデルの一覧から選択（例: `llama3.2`） |
+
+Base URL を `/api/ollama` にすると、Ollama の取得済みモデルが一覧で表示されます。
+`ollama pull` した直後は「一覧を再取得」を押してください。
+一覧を取得できないとき（`OLLAMA_BASE_URL` 未設定・Ollama 未起動など）や、
+一覧にないモデルを使うときは「手動で入力…」から `ollama list` のモデル名を直接入力できます。
 
 「接続テストを実行」で確認できます。チャットのストリーミング・トークン使用量・
 スマートリプライに同じモデルを使用します。初回ロードや CPU 推論には時間がかかるため、
 Ollama へのリクエストは最大10分待機します。
 
-Ollama の接続先は**サーバーの環境変数のみ**で指定します。
-ブラウザから `http://localhost:11434` 等を直接指定すると従来どおり SSRF 対策で拒否されます。
+Ollama の接続先は、**Settings の「Ollama URL」が空でなければそれを、空なら
+サーバーの `OLLAMA_BASE_URL`** を使います。どちらも、このアプリを動かしている
+サーバーから見たアドレスです（Docker で動かす場合、`localhost` はコンテナ自身を指すため
+`http://host.docker.internal:11434` を指定します。ブラウザとは別のマシンで動かしている場合も同様です）。
+Ollama URL ではリンクローカルなどの宛先は拒否されます（詳細は SECURITY.md）。
+Base URL に `http://localhost:11434` 等を直接指定した場合は従来どおり SSRF 対策で拒否されるので、
+必ず Base URL は `/api/ollama` にしてください。
 既存の Gemini / OpenAI 互換エンドポイント設定も引き続き利用できます。
 
 Linux のホスト上で Ollama を使う場合、コンテナから届くインターフェースで
 Ollama を待ち受けさせる必要があります（例: `OLLAMA_HOST=0.0.0.0:11434 ollama serve`）。
 その場合はファイアウォールで Ollama へのアクセスをローカル環境に限定してください。
 Mac では GPU を利用できるホスト版 Ollama を推奨します。
+
+**Rancher Desktop** では、Compose の `host.docker.internal:host-gateway` が Mac ではなく
+Lima VM のゲートウェイ（`172.17.0.1`）を指すため、`Failed to reach Ollama.` になります。
+Settings の「Ollama URL」に `http://host.lima.internal:11434` を指定してください
+（常用するなら `.env` に `OLLAMA_BASE_URL=http://host.lima.internal:11434` を書いて再作成します）。
 
 Ollama もコンテナで動かす場合は、CPU 用の追加構成を利用できます。
 モデルは名前付きボリュームに保存され、Ollama のポートはホストに公開しません。
@@ -152,7 +168,7 @@ Gemini のキーは https://aistudio.google.com/apikey で取得できます。
 | `Bind for 0.0.0.0:3000 failed: port is already allocated` | 3000 番が他のアプリ/コンテナに使われています。`HOST_PORT=3001 docker compose up -d` で別ポートを使うか、占有しているものを止めてください |
 | 会話履歴が消えた | データは**ブラウザごと**の IndexedDB に保存されます。別ブラウザ・シークレットモードでは見えません。Settings → データ管理 からバックアップできます |
 | 外部エンドポイントに繋がらない | サーバー側の SSRF 対策により、プライベート IP・localhost・クラウドメタデータ宛は意図的にブロックされます。Ollama は上記の専用設定を使ってください（[SECURITY.md](SECURITY.md)） |
-| Ollama に繋がらない | `OLLAMA_BASE_URL` をアプリの実行環境に合わせて設定し、再起動してください。コンテナの localhost はホストとは異なります。モデル名は `ollama list` で確認できます |
+| Ollama に繋がらない | Settings の「Ollama URL」を、アプリの実行環境から届くアドレスに設定してください（空欄なら `OLLAMA_BASE_URL`。変更後は再起動）。コンテナの localhost はホストとは異なります。モデル名は `ollama list` で確認できます |
 | Node のバージョンエラー | Node.js 22 を使用してください（`.nvmrc` あり。`nvm use` で切り替え可能） |
 
 ---

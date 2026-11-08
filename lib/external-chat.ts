@@ -10,9 +10,10 @@
 import {
   ExternalUrlError,
   RequestValidationError,
+  assertOllamaDestinationAllowed,
   validateExternalBaseUrl,
 } from './safe-url';
-import { ollamaCompletionUrl } from './ollama';
+import { MAX_OLLAMA_URL_LENGTH, ollamaCompletionUrl, resolveOllamaBase } from './ollama';
 
 export { ExternalUrlError, RequestValidationError } from './safe-url';
 
@@ -24,6 +25,8 @@ export interface ChatMessagePayload {
 export interface ValidatedChatRequest {
   messages: ChatMessagePayload[];
   baseUrl: string;
+  /** Ollama URL entered in Settings; empty means "use the server's OLLAMA_BASE_URL". */
+  ollamaUrl: string;
   apiKey: string;
   modelName: string;
   temperature: number;
@@ -65,6 +68,10 @@ export function parseChatRequestBody(body: unknown): ValidatedChatRequest {
   }
 
   const baseUrl = typeof raw.baseUrl === 'string' ? raw.baseUrl.trim() : '';
+  const ollamaUrl = typeof raw.ollamaUrl === 'string' ? raw.ollamaUrl.trim() : '';
+  if (ollamaUrl.length > MAX_OLLAMA_URL_LENGTH) {
+    throw new RequestValidationError(`"ollamaUrl" must be at most ${MAX_OLLAMA_URL_LENGTH} chars.`);
+  }
   const apiKey = typeof raw.apiKey === 'string' ? raw.apiKey.trim() : '';
   const modelName = isNonEmptyString(raw.modelName, 200)
     ? raw.modelName
@@ -77,6 +84,7 @@ export function parseChatRequestBody(body: unknown): ValidatedChatRequest {
   return {
     messages: messages as ChatMessagePayload[],
     baseUrl,
+    ollamaUrl,
     apiKey,
     modelName,
     temperature,
@@ -94,6 +102,7 @@ export function isExternalEndpoint(baseUrl: string): boolean {
 
 export interface ExternalChatOptions {
   baseUrl: string;
+  ollamaUrl?: string;
   apiKey: string;
   model: string;
   messages: ChatMessagePayload[];
@@ -114,11 +123,14 @@ export async function fetchExternalChatCompletion(
   const isOllama = options.baseUrl === '/api/ollama';
   let configuredOllamaUrl: string | undefined;
   if (isOllama) {
+    const { base, fromClient } = resolveOllamaBase(options.ollamaUrl);
     try {
-      configuredOllamaUrl = ollamaCompletionUrl();
-    } catch {
-      throw new ExternalUrlError('Ollama is not configured correctly. Set OLLAMA_BASE_URL on the server.');
+      configuredOllamaUrl = ollamaCompletionUrl(base);
+    } catch (error) {
+      throw new ExternalUrlError(error instanceof Error ? error.message : 'Ollama is not configured correctly.');
     }
+    // OLLAMA_BASE_URL is set by the operator; a URL from the request still needs checking.
+    if (fromClient) await assertOllamaDestinationAllowed(configuredOllamaUrl);
   }
   const check = configuredOllamaUrl
     ? { ok: true as const, url: configuredOllamaUrl }

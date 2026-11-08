@@ -41,6 +41,8 @@ export interface UserSettings {
   profiles: TalkProfile[];
   activeProfileId: string;
   baseUrl: string;
+  /** Ollama server URL; empty means the server's OLLAMA_BASE_URL. Used when baseUrl is /api/ollama. */
+  ollamaUrl?: string;
   apiKey: string;
   modelName: string;
   temperature: number;

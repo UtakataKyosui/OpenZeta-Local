@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
   let payload: {
     messages: ChatMessagePayload[];
     baseUrl: string;
+    ollamaUrl: string;
     apiKey: string;
     modelName: string;
   };
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message, replies: FALLBACK_REPLIES }, { status: 400 });
   }
 
-  const { messages, baseUrl, apiKey, modelName } = payload;
+  const { messages, baseUrl, ollamaUrl, apiKey, modelName } = payload;
   const promptInstruction = buildPromptInstruction(characterName);
 
   // Branch 1: user-supplied OpenAI-compatible endpoint
@@ -77,6 +78,7 @@ export async function POST(req: NextRequest) {
     try {
       const response = await fetchExternalChatCompletion({
         baseUrl,
+        ollamaUrl,
         apiKey,
         model: modelName || 'gpt-4o-mini',
         messages: [

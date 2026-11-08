@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
-  const { messages, baseUrl, apiKey, modelName, temperature } = payload;
+  const { messages, baseUrl, ollamaUrl, apiKey, modelName, temperature } = payload;
 
   // Branch 1: forward to a user-supplied OpenAI-compatible endpoint (BYOK)
   if (isExternalEndpoint(baseUrl)) {
@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     try {
       response = await fetchExternalChatCompletion({
         baseUrl,
+        ollamaUrl,
         apiKey,
         model: modelName || 'gpt-4o-mini',
         messages,
