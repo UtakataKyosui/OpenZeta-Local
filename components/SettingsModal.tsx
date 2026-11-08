@@ -48,6 +48,7 @@ function SettingsFormModal({
 
   // API Settings State
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl || '/api/chat');
+  const [ollamaUrl, setOllamaUrl] = useState(settings.ollamaUrl || '');
   const [apiKey, setApiKey] = useState(settings.apiKey || '');
   const [modelName, setModelName] = useState(settings.modelName || 'gemini-2.5-flash');
   const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
@@ -123,11 +124,13 @@ function SettingsFormModal({
   useEffect(() => {
     if (!isOllama) return;
     const controller = new AbortController();
+    const trimmedUrl = ollamaUrl.trim();
     async function loadOllamaModels() {
       setOllamaStatus('loading');
       setOllamaError('');
       try {
-        const res = await fetch('/api/ollama/models', { signal: controller.signal });
+        const query = trimmedUrl ? `?url=${encodeURIComponent(trimmedUrl)}` : '';
+        const res = await fetch(`/api/ollama/models${query}`, { signal: controller.signal });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           setOllamaStatus('error');
@@ -143,9 +146,13 @@ function SettingsFormModal({
         setOllamaError('モデル一覧を取得できませんでした');
       }
     }
-    loadOllamaModels();
-    return () => controller.abort();
-  }, [isOllama, ollamaReloadKey]);
+    // Wait for typing to settle so each keystroke does not hit the server.
+    const timer = setTimeout(loadOllamaModels, trimmedUrl ? 500 : 0);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isOllama, ollamaUrl, ollamaReloadKey]);
 
   // A model left over from another provider (e.g. gemini-2.5-flash) is not an Ollama model.
   useEffect(() => {
@@ -170,6 +177,7 @@ function SettingsFormModal({
             { role: 'user', content: 'Ping' },
           ],
           baseUrl,
+          ollamaUrl,
           apiKey,
           modelName,
           temperature: 0.5,
@@ -209,6 +217,7 @@ function SettingsFormModal({
           ? activeId
           : normalizedProfiles[0].id,
         baseUrl: baseUrl.trim() || '/api/chat',
+        ollamaUrl: ollamaUrl.trim(),
         apiKey: apiKey.trim(),
         modelName: modelName.trim() || 'gemini-2.5-flash',
         temperature: Number(temperature),
@@ -441,6 +450,29 @@ function SettingsFormModal({
                   Ollama の API Key は空欄にし、Model Name は取得済みのモデルから選択してください。
                 </p>
               </div>
+
+              {/* Ollama URL */}
+              {isOllama && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-zinc-500" />
+                    Ollama URL (接続先)
+                  </label>
+                  <input
+                    id="settings-ollama-url-input"
+                    type="text"
+                    value={ollamaUrl}
+                    onChange={(e) => setOllamaUrl(e.target.value)}
+                    placeholder="http://localhost:11434"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 text-sm font-mono transition-all"
+                  />
+                  <p className="text-[11px] text-zinc-500">
+                    このアプリを動かしているサーバーから見た Ollama のアドレスを入力します。
+                    空欄の場合はサーバーの OLLAMA_BASE_URL を使います。
+                    アプリを Docker で動かしている場合は http://host.docker.internal:11434 を指定してください。
+                  </p>
+                </div>
+              )}
 
               {/* API Key */}
               <div className="space-y-1.5">

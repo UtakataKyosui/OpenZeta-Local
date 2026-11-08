@@ -123,9 +123,15 @@ try {
   assert.deepEqual(await models.json(), { models: ['llama3.2:latest', 'qwen3:8b'] });
   assert.equal(modelRequests.length, 1);
   assert.equal(modelRequests[0].headers.authorization, undefined);
-  const ignored = await fetch(`${running.origin}/api/ollama/models?url=http://127.0.0.1:1`);
-  assert.equal(ignored.status, 200);
-  assert.equal(modelRequests.length, 2, 'the query string must not change the destination');
+  const modelsVia = (origin, url) => fetch(`${origin}/api/ollama/models?url=${encodeURIComponent(url)}`);
+  assert.equal((await modelsVia(running.origin, 'http://127.0.0.1:1')).status, 502, 'Settings URL must take precedence over OLLAMA_BASE_URL');
+  assert.equal(modelRequests.length, 1, 'the environment destination must not be used when Settings supplies one');
+  for (const url of ['http://169.254.169.254', 'http://[fe80::1]', 'http://user:pw@127.0.0.1:1', 'ftp://127.0.0.1', 'localhost:11434']) {
+    assert.equal((await modelsVia(running.origin, url)).status, 400, url);
+    assert.equal((await post(running.origin, 'chat', { ollamaUrl: url })).status, 400, url);
+    assert.equal((await post(running.origin, 'smart-reply', { ollamaUrl: url })).status, 400, url);
+  }
+  assert.equal(requests.length, 2, 'rejected Settings URLs must not reach Ollama');
   modelsStatus = 500;
   const upstreamError = await fetch(`${running.origin}/api/ollama/models`);
   assert.equal(upstreamError.status, 502);
@@ -138,6 +144,7 @@ try {
     assert.match((await res.json()).error, /redirect/);
   }
   assert.equal((await fetch(`${running.origin}/api/ollama/models`)).status, 502, 'redirects must not be followed');
+  redirect = false;
   running.app.kill();
   await once(running.app, 'exit');
   running = await startApp('');
@@ -149,6 +156,16 @@ try {
   const unconfigured = await fetch(`${running.origin}/api/ollama/models`);
   assert.equal(unconfigured.status, 400);
   assert.match((await unconfigured.json()).error, /OLLAMA_BASE_URL/);
+
+  // With no server-side URL, the one entered in Settings is enough.
+  const mockUrl = `http://127.0.0.1:${mock.address().port}`;
+  const configured = await modelsVia(running.origin, mockUrl);
+  assert.equal(configured.status, 200);
+  assert.deepEqual(await configured.json(), { models: ['llama3.2:latest', 'qwen3:8b'] });
+  const viaSettings = await post(running.origin, 'chat', { ollamaUrl: mockUrl });
+  assert.equal(viaSettings.status, 200);
+  assert.match(await viaSettings.text(), /こんにちは/);
+  assert.equal(requests.at(-1).headers.authorization, undefined);
   console.log('Ollama route integration checks passed (stream, usage, replies, models, validation, SSRF, redirects, missing configuration).');
 } finally {
   if (running && running.app.exitCode === null) {

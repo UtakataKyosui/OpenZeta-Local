@@ -163,6 +163,7 @@ export async function streamChatCompletion({
   const requestBody: Record<string, unknown> = {
     messages,
     baseUrl: settings.baseUrl,
+    ollamaUrl: settings.ollamaUrl ?? '',
     apiKey: settings.apiKey,
     modelName: settings.modelName,
     temperature: settings.temperature,
@@ -283,6 +284,7 @@ export async function fetchSmartReplies(
         characterName: character.name,
         messages: messagesPayload,
         baseUrl: settings.baseUrl,
+        ollamaUrl: settings.ollamaUrl ?? '',
         apiKey: settings.apiKey,
         modelName: settings.modelName,
       }),
