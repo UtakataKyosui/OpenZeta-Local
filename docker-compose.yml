@@ -16,8 +16,12 @@ services:
     pull_policy: build
     container_name: openzeta
     ports:
-      - "${HOST_PORT:-3000}:3000"
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
     environment:
       # サーバー側の Gemini キー (任意)
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # ホストで実行中の Ollama (Linux では下の host-gateway を使用)
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

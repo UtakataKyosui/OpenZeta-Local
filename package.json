@@ -12,7 +12,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --test test/core.test.ts"
+    "test": "node --test test/*.test.ts",
+    "test:ollama-integration": "node test/ollama-integration.mjs"
   },
   "overrides": {
     "next": {
