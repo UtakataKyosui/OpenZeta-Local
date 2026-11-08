@@ -110,6 +110,11 @@ Ollama を待ち受けさせる必要があります（例: `OLLAMA_HOST=0.0.0.0
 その場合はファイアウォールで Ollama へのアクセスをローカル環境に限定してください。
 Mac では GPU を利用できるホスト版 Ollama を推奨します。
 
+**Rancher Desktop** では、Compose の `host.docker.internal:host-gateway` が Mac ではなく
+Lima VM のゲートウェイ（`172.17.0.1`）を指すため、`Failed to reach Ollama.` になります。
+Settings の「Ollama URL」に `http://host.lima.internal:11434` を指定してください
+（常用するなら `.env` に `OLLAMA_BASE_URL=http://host.lima.internal:11434` を書いて再作成します）。
+
 Ollama もコンテナで動かす場合は、CPU 用の追加構成を利用できます。
 モデルは名前付きボリュームに保存され、Ollama のポートはホストに公開しません。
 

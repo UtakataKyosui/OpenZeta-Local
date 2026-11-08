@@ -545,7 +545,7 @@ function SettingsFormModal({
                     <span>
                       {ollamaStatus === 'loading' && 'Ollama のモデル一覧を取得中...'}
                       {ollamaStatus === 'error' &&
-                        `${ollamaError}。OLLAMA_BASE_URL を確認するか、モデル名を直接入力してください。`}
+                        `${ollamaError} Ollama URL（空欄なら OLLAMA_BASE_URL）を確認するか、モデル名を直接入力してください。`}
                       {ollamaStatus === 'ready' &&
                         ollamaModels.length === 0 &&
                         '取得済みのモデルがありません。ollama pull でモデルを取得してください。'}
