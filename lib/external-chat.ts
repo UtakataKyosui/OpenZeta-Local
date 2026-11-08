@@ -12,6 +12,7 @@ import {
   RequestValidationError,
   validateExternalBaseUrl,
 } from './safe-url';
+import { ollamaCompletionUrl } from './ollama';
 
 export { ExternalUrlError, RequestValidationError } from './safe-url';
 
@@ -88,7 +89,7 @@ export function parseChatRequestBody(body: unknown): ValidatedChatRequest {
  */
 export function isExternalEndpoint(baseUrl: string): boolean {
   if (!baseUrl) return false;
-  return baseUrl !== '/api/chat' && !baseUrl.includes('/api/chat');
+  return baseUrl !== '/api/chat';
 }
 
 export interface ExternalChatOptions {
@@ -110,7 +111,18 @@ export interface ExternalChatOptions {
 export async function fetchExternalChatCompletion(
   options: ExternalChatOptions
 ): Promise<Response> {
-  const check = await validateExternalBaseUrl(options.baseUrl);
+  const isOllama = options.baseUrl === '/api/ollama';
+  let configuredOllamaUrl: string | undefined;
+  if (isOllama) {
+    try {
+      configuredOllamaUrl = ollamaCompletionUrl();
+    } catch {
+      throw new ExternalUrlError('Ollama is not configured correctly. Set OLLAMA_BASE_URL on the server.');
+    }
+  }
+  const check = configuredOllamaUrl
+    ? { ok: true as const, url: configuredOllamaUrl }
+    : await validateExternalBaseUrl(options.baseUrl);
   if (!check.ok) {
     throw new ExternalUrlError(check.error);
   }
@@ -123,7 +135,7 @@ export async function fetchExternalChatCompletion(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {}),
+      ...(!isOllama && options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {}),
     },
     body: JSON.stringify({
       model: options.model,

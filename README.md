@@ -5,6 +5,7 @@
 
 - 🐳 **Docker で 1 コマンド起動**
 - 🔑 **BYOK**（自分の API キーを持ち込む）または サーバー側 Gemini キー
+- 🦙 **Ollama** — API キー不要でローカルのモデルと対話
 - 🔒 **ローカルファースト** — 会話データはサーバーに保存されない
 - 🎭 マルチロール（`@キャラ名:` / `@ナレーター:`）、行動描写、返答バリアント、スマートリプライ
 
@@ -17,8 +18,8 @@
 必要なのは **Docker だけ**です。3 行で動きます。
 
 ```bash
-git clone https://github.com/CroudGoat/OpenZeta.git
-cd OpenZeta
+git clone https://github.com/UtakataKyosui/OpenZeta-Local.git
+cd OpenZeta-Local
 docker compose up -d
 ```
 
@@ -31,6 +32,7 @@ docker compose down
 ```
 
 > **イメージを自分でビルドしたくない場合**
+> 以下はフォーク元のイメージです。このForkで追加したOllama対応を使う場合は、上記のComposeでビルドしてください。
 > GitHub Actions が `ghcr.io/croudgoat/openzeta` を自動ビルド・公開しています
 > （`.github/workflows/docker-publish.yml`）。ビルド不要で、次の 1 行で動きます。
 >
@@ -45,8 +47,8 @@ docker compose down
 **Node.js 20.9 以上**（推奨: 22）が必要です。
 
 ```bash
-git clone https://github.com/CroudGoat/OpenZeta.git
-cd OpenZeta
+git clone https://github.com/UtakataKyosui/OpenZeta-Local.git
+cd OpenZeta-Local
 npm ci
 npm run dev
 ```
@@ -64,7 +66,50 @@ npm start
 
 ## API キーの設定
 
-チャットを使うには LLM の API キーが必要です。**どちらか一方**で構いません。
+Ollama は API キー不要です。クラウドモデルを利用する場合は A または B で設定します。
+
+### Ollama（ローカル LLM）
+
+ホストで Ollama を起動し、使うモデルを取得してください（例: `ollama pull llama3.2`）。
+取得にはインターネット接続とモデル用のディスク容量が必要です。
+
+**アプリを Docker で起動する場合**は `docker compose up -d --build` で
+ホストの `http://host.docker.internal:11434` に接続します。
+**Node.js で直接起動する場合**は `.env.local` に `OLLAMA_BASE_URL=http://localhost:11434` を設定して再起動します。
+接続先には `/v1` を付けても付けなくても構いません。
+
+起動後、**Settings → API設定** で以下を保存します。
+
+| 項目 | 設定値 |
+|---|---|
+| Base URL | `/api/ollama` |
+| API Key | 空欄 |
+| Model Name | `ollama list` に表示される取得済みモデル名（例: `llama3.2`） |
+
+「接続テストを実行」で確認できます。チャットのストリーミング・トークン使用量・
+スマートリプライに同じモデルを使用します。初回ロードや CPU 推論には時間がかかるため、
+Ollama へのリクエストは最大10分待機します。
+
+Ollama の接続先は**サーバーの環境変数のみ**で指定します。
+ブラウザから `http://localhost:11434` 等を直接指定すると従来どおり SSRF 対策で拒否されます。
+既存の Gemini / OpenAI 互換エンドポイント設定も引き続き利用できます。
+
+Linux のホスト上で Ollama を使う場合、コンテナから届くインターフェースで
+Ollama を待ち受けさせる必要があります（例: `OLLAMA_HOST=0.0.0.0:11434 ollama serve`）。
+その場合はファイアウォールで Ollama へのアクセスをローカル環境に限定してください。
+Mac では GPU を利用できるホスト版 Ollama を推奨します。
+
+Ollama もコンテナで動かす場合は、CPU 用の追加構成を利用できます。
+モデルは名前付きボリュームに保存され、Ollama のポートはホストに公開しません。
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml exec ollama ollama pull llama3.2
+```
+
+停止時も同じ `-f` オプションを指定して `down` を実行してください。
+GPU コンテナの設定は [Ollama 公式 Docker ガイド](https://docs.ollama.com/docker)を参照してください。
+API は [Ollama の OpenAI 互換 API](https://docs.ollama.com/api/openai-compatibility)を利用しています。
 
 ### A. アプリ内で設定する（BYOK）
 
@@ -106,7 +151,8 @@ Gemini のキーは https://aistudio.google.com/apikey で取得できます。
 | `Error: Cannot find module ...` | `npm ci` をやり直してください（`node_modules` を削除してから実行） |
 | `Bind for 0.0.0.0:3000 failed: port is already allocated` | 3000 番が他のアプリ/コンテナに使われています。`HOST_PORT=3001 docker compose up -d` で別ポートを使うか、占有しているものを止めてください |
 | 会話履歴が消えた | データは**ブラウザごと**の IndexedDB に保存されます。別ブラウザ・シークレットモードでは見えません。Settings → データ管理 からバックアップできます |
-| 外部エンドポイントに繋がらない | サーバー側の SSRF 対策により、プライベート IP・localhost・クラウドメタデータ宛は意図的にブロックされます（[SECURITY.md](SECURITY.md)） |
+| 外部エンドポイントに繋がらない | サーバー側の SSRF 対策により、プライベート IP・localhost・クラウドメタデータ宛は意図的にブロックされます。Ollama は上記の専用設定を使ってください（[SECURITY.md](SECURITY.md)） |
+| Ollama に繋がらない | `OLLAMA_BASE_URL` をアプリの実行環境に合わせて設定し、再起動してください。コンテナの localhost はホストとは異なります。モデル名は `ollama list` で確認できます |
 | Node のバージョンエラー | Node.js 22 を使用してください（`.nvmrc` あり。`nvm use` で切り替え可能） |
 
 ---
@@ -226,6 +272,7 @@ npm run dev     # 開発サーバー
 npm run build   # 本番ビルド
 npm run lint    # ESLint
 npm test        # テスト (Node.js 22 以上)
+npm run test:ollama-integration # npm run build 後、模擬 Ollama で API 統合テスト
 npx tsc --noEmit # 型チェック
 ```
 

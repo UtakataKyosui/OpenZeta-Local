@@ -129,9 +129,8 @@ function SettingsFormModal({
         }),
       });
 
-      await res.body?.cancel();
-
       if (res.ok) {
+        await res.body?.cancel();
         setTestStatus('success');
         setTestMessage('接続成功！ストリーミングAPIの動作を確認しました。');
       } else {
@@ -391,7 +390,8 @@ function SettingsFormModal({
                   className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500/50 text-sm font-mono transition-all"
                 />
                 <p className="text-[11px] text-zinc-500">
-                  標準の「/api/chat」を指定するとサーバー組み込みのGeminiモデルを使用します。
+                  Gemini は「/api/chat」、Ollama は「/api/ollama」を指定します。
+                  Ollama の API Key は空欄にし、Model Name に取得済みのモデル名を入力してください。
                 </p>
               </div>
 

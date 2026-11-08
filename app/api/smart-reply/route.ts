@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
         temperature: 0.8,
         stream: false,
         extraBody: { response_format: { type: 'json_object' } },
-        timeoutMs: 30_000,
+        timeoutMs: baseUrl === '/api/ollama' ? 600_000 : 30_000,
       });
       if (!response.ok) {
         throw new Error(`External API failed with status ${response.status}`);
